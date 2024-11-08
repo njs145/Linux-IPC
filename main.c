@@ -1,9 +1,11 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
+#include<stdio.h>
+#include<stdlib.h>
 
-int main()
+#include "PIPE/PIPE.h"
+
+int main(void)
 {
-    printf("hello IPC!\n");
+    (void)IPC_PIPE();
+
+    return 0; 
 }
