@@ -1,11 +1,11 @@
 #include<stdio.h>
 #include<stdlib.h>
 
-#include "PIPE/PIPE.h"
+#include "pipe/pipe.h"
 
 int main(void)
 {
-    (void)IPC_PIPE();
+    (void)IPC_pipe();
 
     return 0; 
 }

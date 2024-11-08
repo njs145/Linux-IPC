@@ -1,1 +1,0 @@
-extern int IPC_PIPE(void);

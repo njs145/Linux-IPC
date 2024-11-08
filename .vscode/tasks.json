@@ -8,7 +8,7 @@
                 "-fdiagnostics-color=always",
                 "-g",
                 "${file}",
-                "PIPE/PIPE.c",
+                "pipe/pipe.c",
                 "-o",
                 "${fileDirname}/${fileBasenameNoExtension}"
             ],

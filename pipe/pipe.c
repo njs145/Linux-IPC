@@ -7,7 +7,7 @@
 
 #define MAX_BUF_LEN 1028
 
-int IPC_PIPE(void)
+int IPC_pipe(void)
 {
     pid_t pid;
     int pipefd[2] = {0,};
