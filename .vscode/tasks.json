@@ -3,14 +3,16 @@
         {
             "type": "cppbuild",
             "label": "C/C++: gcc 활성 파일 빌드",
-            "command": "/usr/bin/gcc",
+            "command": "/usr/bin/x86_64-linux-gnu-gcc",
             "args": [
                 "-fdiagnostics-color=always",
                 "-g",
                 "${file}",
                 "pipe/pipe.c",
                 "-o",
-                "${fileDirname}/${fileBasenameNoExtension}"
+                "${fileDirname}/${fileBasenameNoExtension}",
+                "-lrt",
+                "-lpthread"
             ],
             "options": {
                 "cwd": "${fileDirname}"
