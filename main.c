@@ -24,19 +24,35 @@ static void mask_receive_flag(__uint32_t *flag, __uint32_t TaskNum);
 static void clear_receive_flag(__uint32_t *flag);
 volatile int key_pressed = 0;
 
+static sem_t *g_sem;
+static shared_data *g_shared_mem;
+
 void* input_thread(void* arg) {
     char c;
     __uint32_t i = 0;
+    __uint32_t count;
     while (1) 
     {
-        do
+        while(1)
         {
-            temp[i] = getchar();
-            printf("문자: %d\n", temp[i]);
+            g_shared_mem->data[i] = getchar();
+
+            if(temp[i] == '\n')
+            {
+                g_shared_mem->pid = getpid();
+                break;
+            }
+
             i ++;
-        } while ((temp[i] != 10));
+        };
         
         printf("문자: %s\n", temp);
+
+        for(count = 0; count < 2; count ++)
+        {
+            printf("sem address: %p",g_sem);
+            sem_post(g_sem);
+        }
 
         usleep(100000);  // CPU 사용을 줄이기 위해 잠시 대기
 
@@ -79,26 +95,27 @@ void writer_process()
 void reader_process() {
     // 공유 메모리 및 세마포어 열기
     int shm_fd = shm_open(SHM_NAME, O_RDWR, 0666);
-    shared_data* shared_mem = mmap(0, sizeof(shared_data), O_RDWR, MAP_SHARED, shm_fd, 0);
+    shared_data *g_shared_mem = mmap(0, sizeof(shared_data), O_RDWR, MAP_SHARED, shm_fd, 0);
     
-    printf("recv palyer count: %d\n",shared_mem->recv_player);
-    shared_mem->recv_player ++;
+    g_shared_mem->recv_player ++;
+    printf("recv palyer count: %d\n",g_shared_mem->recv_player);
 
-    sem_t *sem = sem_open(SEM_NAME, 0);
+    g_sem = sem_open(SEM_NAME, 0);
+    printf("sem address: %p",g_sem);
 
     do
     {
         /* 세마포어 알림 기다리기. */
-        sem_wait(sem);
+        sem_wait(g_sem);
 
         /* 알림 받은 후 읽기. */
-        printf("%d: %s\n", ((shared_data *)shared_mem)->pid, ((shared_data *)shared_mem)->data);
-    } while (strcmp((char *)shared_mem, "END") != 0);
+        printf("%d: %s\n", g_shared_mem->pid, g_shared_mem->data);
+    } while (strcmp((char *)g_shared_mem, "END") != 0);
 
     // 정리
-    munmap(shared_mem, sizeof(int));
+    munmap(g_shared_mem, sizeof(int));
     close(shm_fd);
-    sem_close(sem);
+    sem_close(g_sem);
 }
 
 int main(int argc, char* argv[]) 
@@ -116,6 +133,7 @@ int main(int argc, char* argv[])
         pthread_create(&thread, NULL, input_thread, NULL);
         reader_process();
     }
+
     return 0;
 }
 
