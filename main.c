@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
+#include <error.h>
 
 #define SHM_NAME "/my_shared_memory"
 #define SEM_NAME "/my_semaphore"
@@ -31,38 +32,22 @@ volatile int key_pressed = 0;
 static sem_t *g_sem;
 static shared_data *g_shared_mem;
 
-void* input_thread(void* arg) {
-    char c;
-    __uint32_t i = 0;
-    __uint32_t count;
-    while (1) 
+static __uint32_t flag = 1;
+
+void *input_thread(void* shm) 
+{
+    u_int8_t count;
+    shared_data *th_shm = (shared_data *)shm; 
+    printf("task start!\n");
+    while(1) 
     {
-        while(1)
+        for(count = 0; count < th_shm->recv_player; count ++)
         {
-            g_shared_mem->data[i] = getchar();
-
-            if(temp[i] == '\n')
-            {
-                g_shared_mem->pid = getpid();
-                break;
-            }
-
-            i ++;
-        };
-        
-        printf("문자: %s\n", temp);
-
-        for(count = 0; count < 2; count ++)
-        {
-            printf("sem address: %p",g_sem);
-            sem_post(g_sem);
+            printf("wait task%d!\n",count);
+            sem_wait(th_shm->user_sem[count]);
+            printf("From: user%d: %s \n",count, th_shm->data);
         }
-
-        usleep(100000);  // CPU 사용을 줄이기 위해 잠시 대기
-
-        i = 0;
     }
-    return NULL;
 }
 
 void writer_process() 
@@ -126,11 +111,13 @@ void recv_thread(sem_t *user_sem)
 int main(int argc, char* argv[]) 
 {
     int shm_fd;
+    int error;
     if(argc > 1)
     {
         if(strcmp(argv[1], "server") == 0)
         {
             sem_t *server_sem;
+            pthread_t thread;
             shm_fd = shm_open(SHM_NAME, O_RDWR, 0666);
             if(shm_fd == -1)
             {
@@ -138,20 +125,48 @@ int main(int argc, char* argv[])
                 shm_fd = shm_open(SHM_NAME, (O_CREAT | O_RDWR), 0666);
                 ftruncate(shm_fd, sizeof(g_shared_mem));  // 공유 메모리의 사이즈를 설정한다.
                 g_shared_mem =mmap(0, sizeof(shared_data), O_RDWR, MAP_SHARED, shm_fd, 0);
+                
+                // strcpy(g_shared_mem->sem_name[0], "test sem name");
+                error = pthread_create(&thread, NULL, input_thread, (void *)g_shared_mem);
+                if(error != 0)
+                {
+                    switch(error)
+                    {
+                        case 1:
+                            printf("The caller does not have the necessary permissions to set scheduling attributes.\n");
+                        break;
+
+                        case 11:
+                            printf("Insufficient resources to create another thread, or a system-imposed limit was reached.\n");
+                        break;
+
+                        case 22:
+                            printf("Invalid settings in the pthread_attr_t object or invalid arguments to pthread_create.\n");
+                        break;
+                    }
+                }
+                else
+                {
+                    printf("create thread!\n");
+                }
+
+                pthread_join(thread, NULL);
 
             }
             else
             {
                 printf("Close previous shared mem, semaphore!\n");
+
                 // shm_unlink(SHM_NAME);
                 // if(sem_close(server_sem) == -1)
                 // {
-                    // perror("sem_close failed!\n");
+                //     perror("sem_close failed!\n");
                 // }
                 // if(sem_unlink(SEM_NAME) == -1)
                 // {
-                    // perror("sem_unlink failed!\n");
+                //     perror("sem_unlink failed!\n");
                 // }
+
                 close(shm_fd);
 
                 printf("Open new shared mem, semaphore!\n");
@@ -182,6 +197,8 @@ int main(int argc, char* argv[])
             g_shared_mem->user_sem[g_shared_mem->recv_player] = user_sem;
             strcpy(g_shared_mem->sem_name[g_shared_mem->recv_player], sem_name);
 
+            g_shared_mem->recv_player ++;
+
         }
         else
         {
@@ -193,6 +210,8 @@ int main(int argc, char* argv[])
     {
         printf("Usage ./main server or user\n");
     }
+
+    
         
 
     munmap(g_shared_mem, sizeof(shared_data));
