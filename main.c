@@ -54,94 +54,13 @@ static __uint32_t flag = 1;
 /*---------------------------------------------------------------------------------------------------
 ************************************* LOCAL FUNCTION DEFINITIONS ************************************
 ---------------------------------------------------------------------------------------------------*/
-
+static void *input_thread(void* shm);
 static void run_server(int *shm_fd);
 static void run_user(int *shm_fd);
 
 /*----------------------------------------------------------------------------------------------------
 **************************************** FUNCTION DEFINITIONS ****************************************
 ----------------------------------------------------------------------------------------------------*/
-
-void *input_thread(void* shm) 
-{
-    u_int8_t user_num = 1;
-    shared_data *th_shm = (shared_data *)shm; 
-    u_int32_t count = 1;
-    printf("task start!\n");
-    while(1) 
-    {
-        for(user_num = 1; user_num <= th_shm->recv_player; user_num ++)
-        {
-            if(th_shm->user_sem[user_num] == NULL)
-            {
-                th_shm->user_sem[user_num] = sem_open(th_shm->sem_name[user_num], 0);
-            }
-            printf("wait task%d![%d]\n",user_num,count);
-            sem_wait(th_shm->user_sem[user_num]);
-            printf("From: user%d: %s \n",user_num, th_shm->data);
-        }
-        count ++;
-        // sleep(1);
-    }
-}
-
-void writer_process() 
-{
-    // 공유 메모리 및 세마포어 생성
-    int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
-    ftruncate(shm_fd, sizeof(int));
-    shared_data* shared_mem = mmap(0, sizeof(shared_data), PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    __uint32_t user_num;
-    
-    memset(shared_mem, 0, sizeof(shared_mem));
-    
-    sem_t *sem = sem_open(SEM_NAME, O_CREAT, 0666, 0);
-
-    do
-    {
-        scanf("%s", shared_mem->data);
-        shared_mem->pid = getpid();
-
-        /* 모든 task에게 알림. */
-        for(user_num = 0; user_num < shared_mem->recv_player; user_num ++)
-        {
-            sem_post(sem);
-        }
-
-    } while (1);
-
-    // 정리
-    munmap(shared_mem, sizeof(int));
-    close(shm_fd);
-    sem_close(sem);
-}
-
-void recv_thread(sem_t *user_sem) 
-{
-    // 공유 메모리 및 세마포어 열기
-    int shm_fd = shm_open(SHM_NAME, O_RDWR, 0666);
-    shared_data *g_shared_mem = mmap(0, sizeof(shared_data), O_RDWR, MAP_SHARED, shm_fd, 0);
-    
-    g_shared_mem->recv_player ++;
-    printf("recv palyer user_num: %d\n",g_shared_mem->recv_player);
-
-    g_sem = sem_open(SEM_NAME, 0);
-    printf("sem address: %p",g_sem);
-
-    do
-    {
-        /* 세마포어 알림 기다리기. */
-        sem_wait(user_sem);
-
-        /* 알림 받은 후 읽기. */
-        printf("%d: %s\n", g_shared_mem->pid, g_shared_mem->data);
-    } while (strcmp((char *)g_shared_mem, "END") != 0);
-
-    // 정리
-    munmap(g_shared_mem, sizeof(int));
-    close(shm_fd);
-    sem_close(g_sem);
-}
 
 int main(int argc, char* argv[]) 
 {
@@ -169,6 +88,29 @@ int main(int argc, char* argv[])
     close(shm_fd);
 
     return 0;
+}
+
+static void *input_thread(void* shm) 
+{
+    u_int8_t user_num = 1;
+    shared_data *th_shm = (shared_data *)shm; 
+    u_int32_t count = 1;
+    printf("task start!\n");
+    while(1) 
+    {
+        for(user_num = 1; user_num <= th_shm->recv_player; user_num ++)
+        {
+            if(th_shm->user_sem[user_num] == NULL)
+            {
+                th_shm->user_sem[user_num] = sem_open(th_shm->sem_name[user_num], 0);
+            }
+            printf("wait task%d![%d]\n",user_num,count);
+            sem_wait(th_shm->user_sem[user_num]);
+            printf("From: user%d: %s \n",user_num, th_shm->data);
+        }
+        count ++;
+        // sleep(1);
+    }
 }
 
 static void run_server(int *shm_fd)
