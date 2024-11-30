@@ -15,8 +15,8 @@
 ********************************************** DEFINE ***********************************************
 ---------------------------------------------------------------------------------------------------*/
 
-#define SHM_NAME "/my_shared_memory"
-#define SEM_NAME "/my_semaphore"
+#define SHM_NAME "shared memory"
+#define SEM_MESSAGE_NAME "massage"
 
 /*---------------------------------------------------------------------------------------------------
 ************************************ GLOBAL VARIABLE DEFINITIONS ************************************
@@ -30,7 +30,8 @@ typedef struct
     __uint32_t recv_flag;
     __uint32_t recv_player;
     sem_t *user_sem[MAX_USER];
-    char sem_name[MAX_USER][255];
+    char user_sem_name[MAX_USER][255];
+    char massage_sem_name[255];
     char data[1024];
 }shared_data;
 
@@ -38,10 +39,9 @@ static char temp[1024] = {0,};
 
 volatile int key_pressed = 0;
 
-static sem_t *g_sem;
 static shared_data *g_shared_mem;
 
-static __uint32_t flag = 1;
+static sem_t *g_massage_sem;
 
 /*----------------------------------------------------------------------------------------------------
 ************************************* LOCAL CONSTANT DEFINITIONS *************************************
@@ -54,9 +54,10 @@ static __uint32_t flag = 1;
 /*---------------------------------------------------------------------------------------------------
 ************************************* LOCAL FUNCTION DEFINITIONS ************************************
 ---------------------------------------------------------------------------------------------------*/
-static void *input_thread(void* shm);
 static void run_server(int *shm_fd);
 static void run_user(int *shm_fd);
+static void *server_message_read_thread(void *shm);
+static void write_message(void *shm, char *user_sem_name, char *massage);
 
 /*----------------------------------------------------------------------------------------------------
 **************************************** FUNCTION DEFINITIONS ****************************************
@@ -90,29 +91,6 @@ int main(int argc, char* argv[])
     return 0;
 }
 
-static void *input_thread(void* shm) 
-{
-    u_int8_t user_num = 1;
-    shared_data *th_shm = (shared_data *)shm; 
-    u_int32_t count = 1;
-    printf("task start!\n");
-    while(1) 
-    {
-        for(user_num = 1; user_num <= th_shm->recv_player; user_num ++)
-        {
-            if(th_shm->user_sem[user_num] == NULL)
-            {
-                th_shm->user_sem[user_num] = sem_open(th_shm->sem_name[user_num], 0);
-            }
-            printf("wait task%d![%d]\n",user_num,count);
-            sem_wait(th_shm->user_sem[user_num]);
-            printf("From: user%d: %s \n",user_num, th_shm->data);
-        }
-        count ++;
-        // sleep(1);
-    }
-}
-
 static void run_server(int *shm_fd)
 {
     sem_t *server_sem;
@@ -125,10 +103,14 @@ static void run_server(int *shm_fd)
         printf("create shared mem!\n");
         *shm_fd = shm_open(SHM_NAME, (O_CREAT | O_RDWR), 0666);
         ftruncate(*shm_fd, sizeof(g_shared_mem));  // 공유 메모리의 사이즈를 설정한다.
-        g_shared_mem =mmap(0, sizeof(shared_data), O_RDWR, MAP_SHARED, *shm_fd, 0);
+        g_shared_mem = mmap(0, sizeof(shared_data), O_RDWR, MAP_SHARED, *shm_fd, 0);
+
+
+        strcpy(g_shared_mem->massage_sem_name, SEM_MESSAGE_NAME);
+        g_massage_sem = sem_open(g_shared_mem->massage_sem_name, O_CREAT | O_EXCL, 0644, 1);
         
-        // strcpy(g_shared_mem->sem_name[0], "test sem name");
-        error = pthread_create(&thread, NULL, input_thread, (void *)g_shared_mem);
+        // strcpy(g_shared_mem->user_sem_name[0], "test sem name");
+        error = pthread_create(&thread, NULL, server_message_read_thread, (void *)g_shared_mem);
         if(error != 0)
         {
             switch(error)
@@ -175,14 +157,15 @@ static void run_server(int *shm_fd)
         *shm_fd = shm_open(SHM_NAME, (O_CREAT | O_RDWR), 0666);
         ftruncate(*shm_fd, sizeof(g_shared_mem));  // 공유 메모리의 사이즈를 설정한다.
         g_shared_mem =mmap(0, sizeof(shared_data), O_RDWR, MAP_SHARED, *shm_fd, 0);
+        sem_unlink(SEM_MESSAGE_NAME);
     }
 }
 
 static void run_user(int *shm_fd)
 {
     char sem_name[255];
-
     char massage[256];
+    u_int8_t user_num;
     *shm_fd = shm_open(SHM_NAME, O_RDWR, 0666);
     if(*shm_fd == -1)
     {
@@ -192,8 +175,10 @@ static void run_user(int *shm_fd)
     sem_t *user_sem;
     
     g_shared_mem =mmap(0, sizeof(shared_data), O_RDWR, MAP_SHARED, *shm_fd, 0);
+
+    g_massage_sem = sem_open(g_shared_mem->massage_sem_name, 0);
+
     sprintf(sem_name, "user sem %d",g_shared_mem->recv_player);
-    
     user_sem = sem_open(sem_name, O_CREAT, 0666, 1);
     if (user_sem == SEM_FAILED) 
     {
@@ -217,13 +202,49 @@ static void run_user(int *shm_fd)
     
     // g_shared_mem->user_sem[g_shared_mem->recv_player] = user_sem;
     g_shared_mem->recv_player ++;
-    strcpy(g_shared_mem->sem_name[g_shared_mem->recv_player], sem_name);
+    user_num = g_shared_mem->recv_player;
+    strcpy(g_shared_mem->user_sem_name[user_num], sem_name);
     while(1)
     {
-        printf("send massage!\n");
-        sprintf(massage,"task%d: hello!\n",g_shared_mem->recv_player);
-        strcpy(g_shared_mem->data, massage);
+        sprintf(massage,"task%d: hello!\n",user_num);
+        write_message(g_shared_mem, g_shared_mem->user_sem_name[user_num], massage);
         sleep(1);
+
         sem_post(user_sem);
     }
+}
+
+static void *server_message_read_thread(void *shm) 
+{
+    u_int8_t user_num = 1;
+    shared_data *th_shm = (shared_data *)shm; 
+    u_int32_t count = 0;
+    printf("task start!\n");
+    while(1) 
+    {
+        for(user_num = 1; user_num <= th_shm->recv_player; user_num ++)
+        {
+            if(th_shm->user_sem[user_num] == NULL)
+            {
+                th_shm->user_sem[user_num] = sem_open(th_shm->user_sem_name[user_num], 0);
+            }
+            printf("wait task%d![%d]\n",user_num,count);
+            sem_wait(th_shm->user_sem[user_num]); // sempore 안오면 그냥 넘어감.
+            printf("From: user%d: %s \n\n",user_num, th_shm->data);
+            sem_post(g_massage_sem);
+            count ++;
+        }
+        // sleep(1);
+    }
+}
+
+static void write_message(void *shm, char *user_sem_name, char *massage)
+{
+    shared_data *shared_mem = (shared_data *)shm;
+    sem_t * user_sem = sem_open(user_sem_name, 0);
+
+    sem_wait(g_massage_sem);
+    printf("send massage!\n");
+    strcpy(shared_mem->data, massage);
+    sem_post(user_sem);
 }
